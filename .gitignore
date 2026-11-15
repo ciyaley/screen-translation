@@ -1,0 +1,25 @@
+# macOS build & runtime artifacts
+.build/
+.runtime/
+build/
+*.dmg
+*.zip
+
+# Windows build & runtime artifacts
+windows/.runtime/
+windows/build/
+windows/build.next/
+windows/dist/
+windows/src/*/bin/
+windows/src/*/obj/
+windows/.vs/
+
+# Legacy prototype scripts & internal design notes (unused at runtime)
+context_state_machine.py
+test_context_state_machine.py
+doc/
+
+# OS / Editor
+.DS_Store
+*.swp
+*.user

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_PATH="${ROOT_DIR}/build/ScreenTranslate.app"
+
+if [[ ! -d "${APP_PATH}" ]]; then
+    echo "ScreenTranslate.app not found; building first..."
+    bash "${ROOT_DIR}/scripts/bundle_app.sh"
+fi
+
+# 既存のUIプロセスのみ安全に終了して置き換える（稼働済みのPLaMo推論サーバーは維持して即時応答させる）
+RUNTIME_DIR="${ROOT_DIR}/.runtime"
+if [[ -f "${RUNTIME_DIR}/control.cmd" ]]; then
+    printf "quit\n" > "${RUNTIME_DIR}/control.cmd" 2>/dev/null || true
+fi
+/usr/bin/pkill -x ScreenTranslate 2>/dev/null || true
+
+for _ in {1..25}; do
+    if ! /usr/bin/pgrep -x ScreenTranslate >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.05
+done
+sleep 0.15
+
+# PLaMo 3 Translate ローカル推論サーバーが未起動ならバックグラウンドで非同期ウォームアップ
+bash "${ROOT_DIR}/scripts/manage_plamo.sh" start "${PLAMO_SIZE:-2b}" >/dev/null 2>&1 || true
+
+if ! /usr/bin/open "${APP_PATH}" 2>/dev/null; then
+    sleep 0.35
+    /usr/bin/open "${APP_PATH}"
+fi
+
+echo "ScreenTranslate opened (${APP_PATH}) with PLaMo 3 Translate backend."

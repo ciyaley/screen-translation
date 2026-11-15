@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <WinAppTfm Condition="'$(WinAppTfm)' == ''">net9.0-windows10.0.19041.0</WinAppTfm>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>$(WinAppTfm)</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>ScreenTranslate</AssemblyName>
+    <Version>0.8.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenTranslate.Core\ScreenTranslate.Core.csproj" />
+  </ItemGroup>
+</Project>

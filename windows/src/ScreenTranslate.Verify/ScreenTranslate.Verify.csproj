@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <WinCoreTfm Condition="'$(WinCoreTfm)' == ''">net9.0</WinCoreTfm>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>$(WinCoreTfm)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenTranslate.Core\ScreenTranslate.Core.csproj" />
+  </ItemGroup>
+</Project>
