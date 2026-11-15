@@ -313,27 +313,17 @@ public sealed class NativeSidecarManager : IDisposable
             "GPU推論エンジン (llama.cpp) の最新リリース情報を確認中…",
             0.02));
 
-        var releaseApiUri = new UriBuilder(Uri.UriSchemeHttps, "api.github.com", 443, "/repos/ggml-org/llama.cpp/releases/latest").Uri;
+        var releaseApiUri = new UriBuilder(Uri.UriSchemeHttps, "api.github.com", 443, "/repos/ggml-org/llama.cpp/releases")
+        {
+            Query = "per_page=15"
+        }.Uri;
         using var resp = await _http.GetAsync(releaseApiUri, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
 
         string json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         using var doc = JsonDocument.Parse(json);
 
-        var assets = new List<(string Name, string Url, long Size)>();
-        if (doc.RootElement.TryGetProperty("assets", out var arr) && arr.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in arr.EnumerateArray())
-            {
-                string name = item.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "";
-                string url = item.TryGetProperty("browser_download_url", out var u) ? (u.GetString() ?? "") : "";
-                long sz = item.TryGetProperty("size", out var s) && s.TryGetInt64(out long v) ? v : 0L;
-                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(url))
-                    assets.Add((name, url, sz));
-            }
-        }
-
-        var selectedAssets = SelectEngineAssets(assets, flavor, out string actualSubdir);
+        var selectedAssets = PickLatestReleaseAssetsFromJson(doc.RootElement, flavor, out string actualSubdir);
         if (selectedAssets.Count == 0)
             throw new InvalidOperationException("Windows x64 用の llama-server 配布パッケージが見つかりませんでした。");
 
@@ -375,6 +365,53 @@ public sealed class NativeSidecarManager : IDisposable
         return exe;
     }
 
+    public static IReadOnlyList<(string Name, string Url, long Size)> PickLatestReleaseAssetsFromJson(
+        JsonElement root,
+        GpuEngineFlavor preferredFlavor,
+        out string subdirName)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var release in root.EnumerateArray())
+            {
+                if (release.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True)
+                    continue;
+
+                var assets = ExtractAssets(release);
+                if (assets.Count == 0) continue;
+
+                var picked = SelectEngineAssets(assets, preferredFlavor, out subdirName);
+                if (picked.Count > 0) return picked;
+            }
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            var assets = ExtractAssets(root);
+            var picked = SelectEngineAssets(assets, preferredFlavor, out subdirName);
+            if (picked.Count > 0) return picked;
+        }
+
+        subdirName = "vulkan";
+        return Array.Empty<(string, string, long)>();
+    }
+
+    private static List<(string Name, string Url, long Size)> ExtractAssets(JsonElement releaseObj)
+    {
+        var assets = new List<(string Name, string Url, long Size)>();
+        if (releaseObj.TryGetProperty("assets", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in arr.EnumerateArray())
+            {
+                string name = item.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "";
+                string url = item.TryGetProperty("browser_download_url", out var u) ? (u.GetString() ?? "") : "";
+                long sz = item.TryGetProperty("size", out var s) && s.TryGetInt64(out long v) ? v : 0L;
+                if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(url))
+                    assets.Add((name, url, sz));
+            }
+        }
+        return assets;
+    }
+
     public static IReadOnlyList<(string Name, string Url, long Size)> SelectEngineAssets(
         IReadOnlyList<(string Name, string Url, long Size)> releaseAssets,
         GpuEngineFlavor preferredFlavor,
@@ -382,19 +419,24 @@ public sealed class NativeSidecarManager : IDisposable
     {
         if (preferredFlavor == GpuEngineFlavor.Cuda)
         {
-            var cudaMain = releaseAssets.FirstOrDefault(a =>
+            var cudaMains = releaseAssets.Where(a =>
                 a.Name.StartsWith("llama-", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.Contains("-bin-win-cuda-", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.EndsWith("-x64.zip", StringComparison.OrdinalIgnoreCase));
 
-            var cudaRt = releaseAssets.FirstOrDefault(a =>
-                a.Name.StartsWith("cudart-llama-bin-win-cuda-", StringComparison.OrdinalIgnoreCase) &&
-                a.Name.EndsWith("-x64.zip", StringComparison.OrdinalIgnoreCase));
-
-            if (!string.IsNullOrEmpty(cudaMain.Url) && !string.IsNullOrEmpty(cudaRt.Url))
+            foreach (var cudaMain in cudaMains)
             {
-                subdirName = "cuda";
-                return [cudaRt, cudaMain];
+                int idx = cudaMain.Name.IndexOf("-bin-win-cuda-", StringComparison.OrdinalIgnoreCase);
+                string suffix = idx >= 0 ? cudaMain.Name[idx..] : string.Empty; // e.g. -bin-win-cuda-12.4-x64.zip
+                var cudaRt = releaseAssets.FirstOrDefault(a =>
+                    a.Name.StartsWith("cudart-llama", StringComparison.OrdinalIgnoreCase) &&
+                    a.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrEmpty(cudaMain.Url) && !string.IsNullOrEmpty(cudaRt.Url))
+                {
+                    subdirName = "cuda";
+                    return [cudaRt, cudaMain];
+                }
             }
         }
 

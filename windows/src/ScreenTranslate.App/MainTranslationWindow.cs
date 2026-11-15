@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Shell;
 using System.Windows.Threading;
 using ScreenTranslate.Core;
+using ShapePath = System.Windows.Shapes.Path;
 
 namespace ScreenTranslate.App;
 
@@ -76,7 +77,7 @@ internal sealed class MainTranslationWindow : Window
     private readonly TextBlock _setupDetailBlock = new();
     private readonly Border _progressTrack = new() { Visibility = Visibility.Collapsed };
     private readonly Border _progressFill = new() { HorizontalAlignment = HorizontalAlignment.Left };
-    private readonly StackPanel _setupActionsPanel = new() { Orientation = Orientation.Horizontal };
+    private readonly WrapPanel _setupActionsPanel = new() { Orientation = Orientation.Horizontal };
     private readonly StackPanel _cardsPanel = new() { Orientation = Orientation.Vertical };
     private readonly TextBlock _statusNoticeBlock = new();
 
@@ -394,7 +395,7 @@ internal sealed class MainTranslationWindow : Window
             BorderBrush = accent ? EmeraldBrush : CreateFrozenBrush(Color.FromArgb(48, 255, 255, 255)),
             BorderThickness = new Thickness(0.8),
             Padding = new Thickness(10, 0, 10, 0),
-            Margin = new Thickness(0, 0, 7, 0),
+            Margin = new Thickness(0, 0, 7, 6),
             Child = tb,
             Cursor = Cursors.Hand
         };
@@ -555,9 +556,9 @@ internal sealed class MainTranslationWindow : Window
         _stageBadgePanel.Children.Add(_stageDot);
         _stageBadgePanel.Children.Add(_stageLabel);
 
-        _captureToggleBtn = MakeHeaderIconButton("▶", "監視を開始 / 停止 (Alt+Shift+T)", ToggleCaptureAction);
-        _settingsBtn = MakeHeaderIconButton("⚙", "モデル管理・PCショートカット登録", ShowAppSettingsMenu);
-        _collapseBtn = MakeHeaderIconButton("⌃", "バーに折りたたむ / 広げる (Ctrl+K)", ToggleCollapse);
+        _captureToggleBtn = MakeHeaderIconButton("play", "監視を開始 / 停止 (Alt+Shift+T)", ToggleCaptureAction);
+        _settingsBtn = MakeHeaderIconButton("settings", "モデル管理・PCショートカット登録", ShowAppSettingsMenu);
+        _collapseBtn = MakeHeaderIconButton("collapse", "バーに折りたたむ / 広げる (Ctrl+K)", ToggleCollapse);
     }
 
     private void RebuildResponsiveHeader(double currentWidth)
@@ -577,7 +578,7 @@ internal sealed class MainTranslationWindow : Window
         DetachFromParent(_collapseBtn);
 
         var closeBtn = MakeCircleCloseButton(() => PerformCleanShutdown(0));
-        var rangeBtn = MakeHeaderIconButton("⛶", "監視範囲を選択 (Alt+Shift+R)", SelectRegionAction);
+        var rangeBtn = MakeHeaderIconButton("region", "監視範囲を選択 (Alt+Shift+R)", SelectRegionAction);
 
         var langPair = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         langPair.Children.Add(_srcLangBtn);
@@ -599,12 +600,14 @@ internal sealed class MainTranslationWindow : Window
 
         if (!twoRow)
         {
-            var bar = new DockPanel
+            var bar = new Grid
             {
-                LastChildFill = true,
                 Height = CollapsedBarHeight,
                 Margin = new Thickness(11, 0, 11, 0)
             };
+            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var leftGroup = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             leftGroup.Children.Add(closeBtn);
@@ -617,11 +620,12 @@ internal sealed class MainTranslationWindow : Window
                 leftGroup.Children.Add(_modeBtn);
             }
 
-            DockPanel.SetDock(leftGroup, Dock.Left);
-            DockPanel.SetDock(rightButtons, Dock.Right);
+            Grid.SetColumn(leftGroup, 0);
+            Grid.SetColumn(_stageBadgePanel, 1);
+            Grid.SetColumn(rightButtons, 2);
             bar.Children.Add(leftGroup);
-            bar.Children.Add(rightButtons);
             bar.Children.Add(_stageBadgePanel);
+            bar.Children.Add(rightButtons);
 
             _headerHost.Child = bar;
         }
@@ -633,22 +637,30 @@ internal sealed class MainTranslationWindow : Window
                 Margin = new Thickness(11, 7, 11, 6)
             };
 
-            var row1 = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, 0, 5) };
+            var row1 = new Grid { Margin = new Thickness(0, 0, 0, 5) };
+            row1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row1.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
             var left1 = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             left1.Children.Add(closeBtn);
             left1.Children.Add(langPair);
-            DockPanel.SetDock(left1, Dock.Left);
-            DockPanel.SetDock(rightButtons, Dock.Right);
+            Grid.SetColumn(left1, 0);
+            Grid.SetColumn(rightButtons, 2);
             row1.Children.Add(left1);
             row1.Children.Add(rightButtons);
 
-            var row2 = new DockPanel { LastChildFill = true };
+            var row2 = new Grid();
+            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
             var left2 = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             _backendBtn.Margin = new Thickness(0, 0, 6, 0);
             _modeBtn.Margin = new Thickness(0, 0, 6, 0);
             left2.Children.Add(_backendBtn);
             left2.Children.Add(_modeBtn);
-            DockPanel.SetDock(left2, Dock.Left);
+            Grid.SetColumn(left2, 0);
+            Grid.SetColumn(_stageBadgePanel, 1);
             row2.Children.Add(left2);
             row2.Children.Add(_stageBadgePanel);
 
@@ -742,26 +754,50 @@ internal sealed class MainTranslationWindow : Window
             tb.Text = $"{text} ▾";
     }
 
-    private static Button MakeHeaderIconButton(string glyph, string tooltip, Action onClick)
+    private static Geometry GetHeaderIconGeometry(string iconKey) => iconKey switch
     {
-        var tb = new TextBlock
+        "region" => Geometry.Parse("M2,5 V2 H5 M10,2 H13 V5 M13,10 V13 H10 M5,13 H2 V10"),
+        "play" => Geometry.Parse("M4,2.5 L12,7.5 L4,12.5 Z"),
+        "stop" => Geometry.Parse("M3.5,3.5 H11.5 V11.5 H3.5 Z"),
+        "settings" => Geometry.Parse("M7.5,5.2 A2.3,2.3 0 1,1 7.49,5.2 Z M7.5,1.5 V3 M7.5,12 V13.5 M1.5,7.5 H3 M12,7.5 H13.5 M3.3,3.3 L4.4,4.4 M10.6,10.6 L11.7,11.7 M11.7,3.3 L10.6,4.4 M4.4,10.6 L3.3,11.7"),
+        "collapse" => Geometry.Parse("M3.5,9.5 L7.5,5.5 L11.5,9.5"),
+        "expand" => Geometry.Parse("M3.5,5.5 L7.5,9.5 L11.5,5.5"),
+        _ => Geometry.Parse("M3,7.5 H12")
+    };
+
+    private static bool IsFilledHeaderIcon(string iconKey) => iconKey is "play" or "stop";
+
+    private static ShapePath CreateHeaderIconPath(string iconKey)
+    {
+        bool filled = IsFilledHeaderIcon(iconKey);
+        var brush = CreateFrozenBrush(Color.FromArgb(215, 255, 255, 255));
+        return new ShapePath
         {
-            Text = glyph,
-            FontSize = 11.5,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = CreateFrozenBrush(Color.FromArgb(208, 255, 255, 255)),
+            Data = GetHeaderIconGeometry(iconKey),
+            Width = 13,
+            Height = 13,
+            Stretch = Stretch.Uniform,
+            Fill = filled ? brush : Brushes.Transparent,
+            Stroke = filled ? null : brush,
+            StrokeThickness = filled ? 0 : 1.5,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
+    }
 
+    private static Button MakeHeaderIconButton(string iconKey, string tooltip, Action onClick)
+    {
         var border = new Border
         {
-            Width = 25,
+            Width = 26,
             Height = 22,
             CornerRadius = new CornerRadius(6),
             Background = CreateFrozenBrush(Color.FromArgb(26, 255, 255, 255)),
             Margin = new Thickness(3, 0, 0, 0),
-            Child = tb,
+            Child = CreateHeaderIconPath(iconKey),
             Cursor = Cursors.Hand,
             ToolTip = tooltip
         };
@@ -772,11 +808,11 @@ internal sealed class MainTranslationWindow : Window
         return WrapBorderAsPlainButton(border, onClick);
     }
 
-    private static void SetHeaderIconGlyph(Button btn, string glyph, bool prominent)
+    private static void SetHeaderIconGlyph(Button btn, string iconKey, bool prominent)
     {
-        if (btn.Content is Border b && b.Child is TextBlock tb)
+        if (btn.Content is Border b)
         {
-            tb.Text = glyph;
+            b.Child = CreateHeaderIconPath(iconKey);
             b.Background = CreateFrozenBrush(Color.FromArgb((byte)(prominent ? 62 : 26), 255, 255, 255));
         }
     }
@@ -991,7 +1027,7 @@ internal sealed class MainTranslationWindow : Window
             Height = CollapsedBarHeight;
             _dividerLine.Visibility = Visibility.Collapsed;
             _bodyScroller.Visibility = Visibility.Collapsed;
-            SetHeaderIconGlyph(_collapseBtn, "⌄", false);
+            SetHeaderIconGlyph(_collapseBtn, "expand", false);
         }
         else
         {
@@ -1002,7 +1038,7 @@ internal sealed class MainTranslationWindow : Window
             Height = restoreH;
             _dividerLine.Visibility = Visibility.Visible;
             _bodyScroller.Visibility = Visibility.Visible;
-            SetHeaderIconGlyph(_collapseBtn, "⌃", false);
+            SetHeaderIconGlyph(_collapseBtn, "collapse", false);
         }
 
         _lastRenderedTwoRowMode = null;
@@ -1409,7 +1445,7 @@ internal sealed class MainTranslationWindow : Window
             _captureEngine.Stop();
             _hoveredCard = null;
             _isCapturing = false;
-            SetHeaderIconGlyph(_captureToggleBtn, "▶", prominent: false);
+            SetHeaderIconGlyph(_captureToggleBtn, "play", prominent: false);
             _spotCursorTimer.Stop();
             _regionIndicator.Hide();
             _inPlaceOverlay.Hide();
@@ -1434,7 +1470,7 @@ internal sealed class MainTranslationWindow : Window
             _sidecar.TryAutoStartIfInstalled(_backend, _gpuFlavor);
 
         _isCapturing = true;
-        SetHeaderIconGlyph(_captureToggleBtn, "■", prominent: true);
+        SetHeaderIconGlyph(_captureToggleBtn, "stop", prominent: true);
         if (_sidecar.LatestStatus.State == SidecarState.Ready)
             UpdateStage("待機中", busy: false);
         SetStatusNotice($"監視中（{_displayMode.ShortName()}モード / {_backend.ShortName()}）");
