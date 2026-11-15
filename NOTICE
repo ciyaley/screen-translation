@@ -1,0 +1,25 @@
+THIRD-PARTY MODELS AND SOFTWARE NOTICES
+
+This repository contains only the source code of ScreenTranslate (MIT License) and
+does NOT redistribute model weights or third-party inference binaries.
+When you download and run translation models or inference engines through this
+application, their respective licenses apply:
+
+1. PLaMo 3 Translate Models (Preferred Networks, Inc.)
+   - Models used:
+     * pfnet/plamo-3-translate-0.8b-GGUF / MLX-4bit
+     * pfnet/plamo-3-translate-2b-GGUF / MLX-4bit
+     * pfnet/plamo-3-translate-8b-GGUF / MLX-4bit
+   - License: PLaMo Community License (Preferred Networks, Inc.)
+   - Summary of terms (please check the official license text for full details):
+     * Personal / Non-commercial / Academic use: Free of charge without prior registration.
+     * Commercial use (annual revenue/sales of 1 billion JPY or less): Free of charge
+       upon submitting the PLaMo Commercial Use Registration Form.
+     * Commercial use (annual revenue/sales exceeding 1 billion JPY): Requires a
+       separate license agreement with Preferred Networks, Inc.
+
+2. llama.cpp (ggml-org/llama.cpp)
+   - License: MIT License
+
+3. mlx-lm / MLX (ml-explore) [macOS Apple Silicon]
+   - License: MIT License
