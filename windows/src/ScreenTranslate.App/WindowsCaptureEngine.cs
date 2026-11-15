@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using ScreenTranslate.Core;
 using Windows.Globalization;
 using Windows.Graphics.Imaging;
@@ -26,8 +27,8 @@ public abstract record CapturedTextEvent
 /// <summary>
 /// Windows ネイティブ画面キャプチャ + WinRT Windows.Media.Ocr エンジン。
 /// - WDA_EXCLUDEFROMCAPTURE と連携して自アプリのウィンドウをキャプチャ映像から 100% 除外。
-/// - Top-Down 32BGRA DIBSection を再利用し、静止中は 512点輝度比較 (1.8µs) のみで即座にスキップ。
-/// - 翻訳中に変化した画面は 1 枚だけバイト配列へ退避し、翻訳完了直後に自動評価（取りこぼしゼロ）。
+/// - Top-Down 32BGRA DIBSection を再利用し、静止中は 512点輝度比較のみで即座にスキップ。
+/// - OcrLine 内の単語群を行セグメント単位へ結合して macOS Vision OCR と同等の粒度で空間フィルタへ渡す。
 /// </summary>
 internal sealed class WindowsCaptureEngine : IDisposable
 {
@@ -196,6 +197,7 @@ internal sealed class WindowsCaptureEngine : IDisposable
                 else
                 {
                     _ = Win32Interop.SetStretchBltMode(_memDc, 4); // HALFTONE
+                    _ = Win32Interop.SetBrushOrgEx(_memDc, 0, 0, IntPtr.Zero);
                     ok = Win32Interop.StretchBlt(_memDc, 0, 0, dstW, dstH, screenDc, srcX, srcY, srcW, srcH, Win32Interop.SRCCOPY);
                 }
             }
@@ -278,7 +280,13 @@ internal sealed class WindowsCaptureEngine : IDisposable
 
         OnTextEvent?.Invoke(new CapturedTextEvent.OcrStarted());
 
-        var rawObservations = await PerformWindowsOcrAsync(bgraBytes, width, height, srcLang, ct).ConfigureAwait(false);
+        var (rawObservations, packMissingError) = await PerformWindowsOcrAsync(bgraBytes, width, height, srcLang, tgtLang, ct).ConfigureAwait(false);
+        if (packMissingError is not null)
+        {
+            OnStatusError?.Invoke(packMissingError);
+            return;
+        }
+
         var spatial = OcrSpatialFilter.ExtractPrimaryText(rawObservations, srcLang, tgtLang);
 
         if (spatial.Clusters.Count == 0)
@@ -354,18 +362,18 @@ internal sealed class WindowsCaptureEngine : IDisposable
         OnTextEvent?.Invoke(new CapturedTextEvent.Skipped(reason));
     }
 
-    private async Task<IReadOnlyList<OcrTextObservation>> PerformWindowsOcrAsync(
+    private async Task<(IReadOnlyList<OcrTextObservation> Observations, string? Error)> PerformWindowsOcrAsync(
         byte[] bgraBytes,
         int width,
         int height,
         string sourceLangCode,
+        string targetLangCode,
         CancellationToken ct)
     {
-        var engine = ResolveOcrEngine(sourceLangCode);
+        var (engine, missingError) = ResolveOcrEngine(sourceLangCode, targetLangCode);
         if (engine is null)
         {
-            OnStatusError?.Invoke("Windows OCR 言語パックが見つかりません（Windows 設定 → 時刻と言語 → 言語と地域 から対象言語を追加してください）");
-            return Array.Empty<OcrTextObservation>();
+            return (Array.Empty<OcrTextObservation>(), missingError ?? "Windows OCR 言語パックが見つかりません（Windows 設定 → 時刻と言語 → 言語と地域 から追加してください）");
         }
 
         try
@@ -382,7 +390,7 @@ internal sealed class WindowsCaptureEngine : IDisposable
             var ocrResult = await engine.RecognizeAsync(softwareBitmap);
             ct.ThrowIfCancellationRequested();
             if (ocrResult?.Lines is null || ocrResult.Lines.Count == 0)
-                return Array.Empty<OcrTextObservation>();
+                return (Array.Empty<OcrTextObservation>(), null);
 
             var list = new List<OcrTextObservation>();
             double invW = 1.0 / Math.Max(1, width);
@@ -392,87 +400,169 @@ internal sealed class WindowsCaptureEngine : IDisposable
             {
                 if (line.Words is { Count: > 0 })
                 {
+                    // macOS Vision OCR と同じ「行セグメント」粒度にまとめる（広い横空隙がある場合のみ別セグメントへ分割）
+                    var segText = new StringBuilder();
+                    double segMinX = 0, segMinY = 0, segMaxX = 0, segMaxY = 0;
+                    bool hasSeg = false;
+                    string prevWordText = string.Empty;
+                    double prevRightPx = 0;
+
                     foreach (var word in line.Words)
                     {
+                        string wt = word.Text?.Trim() ?? string.Empty;
+                        if (wt.Length == 0) continue;
+
                         var r = word.BoundingRect;
-                        list.Add(new OcrTextObservation(
-                            word.Text,
-                            0.90f,
-                            r.X * invW,
-                            r.Y * invH,
-                            r.Width * invW,
-                            r.Height * invH));
+                        double wx1 = r.X;
+                        double wy1 = r.Y;
+                        double wx2 = r.X + Math.Max(1.0, r.Width);
+                        double wy2 = r.Y + Math.Max(1.0, r.Height);
+
+                        if (!hasSeg)
+                        {
+                            segText.Append(wt);
+                            segMinX = wx1; segMinY = wy1; segMaxX = wx2; segMaxY = wy2;
+                            hasSeg = true;
+                        }
+                        else
+                        {
+                            double segH = Math.Max(1.0, segMaxY - segMinY);
+                            double gapPx = wx1 - prevRightPx;
+                            double splitThresholdPx = Math.Max(segH * 2.2, width * 0.08);
+
+                            if (gapPx > splitThresholdPx)
+                            {
+                                EmitLineSegment(list, segText.ToString(), segMinX, segMinY, segMaxX, segMaxY, invW, invH);
+                                segText.Clear();
+                                segText.Append(wt);
+                                segMinX = wx1; segMinY = wy1; segMaxX = wx2; segMaxY = wy2;
+                            }
+                            else
+                            {
+                                if (EndsWithCjkChar(prevWordText) && StartsWithCjkChar(wt) && gapPx < segH * 0.9)
+                                    segText.Append(wt);
+                                else
+                                    segText.Append(' ').Append(wt);
+
+                                segMinX = Math.Min(segMinX, wx1);
+                                segMinY = Math.Min(segMinY, wy1);
+                                segMaxX = Math.Max(segMaxX, wx2);
+                                segMaxY = Math.Max(segMaxY, wy2);
+                            }
+                        }
+
+                        prevWordText = wt;
+                        prevRightPx = wx2;
+                    }
+
+                    if (hasSeg)
+                    {
+                        EmitLineSegment(list, segText.ToString(), segMinX, segMinY, segMaxX, segMaxY, invW, invH);
                     }
                 }
                 else if (!string.IsNullOrWhiteSpace(line.Text))
                 {
-                    list.Add(new OcrTextObservation(line.Text, 0.88f, 0.05, 0.1, 0.9, 0.08));
+                    list.Add(new OcrTextObservation(line.Text.Trim(), 0.88f, 0.05, 0.1, 0.9, 0.08));
                 }
             }
 
-            return list;
+            return (list, null);
         }
         catch
         {
-            return Array.Empty<OcrTextObservation>();
+            return (Array.Empty<OcrTextObservation>(), null);
         }
     }
 
-    private OcrEngine? ResolveOcrEngine(string langCode)
+    private static void EmitLineSegment(
+        List<OcrTextObservation> list,
+        string text,
+        double x1,
+        double y1,
+        double x2,
+        double y2,
+        double invW,
+        double invH)
     {
+        string t = text.Trim();
+        if (t.Length == 0) return;
+        list.Add(new OcrTextObservation(
+            t,
+            0.91f,
+            x1 * invW,
+            y1 * invH,
+            Math.Max(1.0, x2 - x1) * invW,
+            Math.Max(1.0, y2 - y1) * invH));
+    }
+
+    private static bool EndsWithCjkChar(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        Rune last = default;
+        foreach (Rune r in s.EnumerateRunes()) last = r;
+        return TranslatabilityGate.IsCjkRune(last);
+    }
+
+    private static bool StartsWithCjkChar(string s)
+    {
+        foreach (Rune r in s.EnumerateRunes())
+            return TranslatabilityGate.IsCjkRune(r);
+        return false;
+    }
+
+    private (OcrEngine? Engine, string? MissingError) ResolveOcrEngine(string langCode, string targetLangCode)
+    {
+        string cacheKey = $"{langCode}->{targetLangCode}";
         lock (_ocrCache)
         {
-            if (_ocrCache.TryGetValue(langCode, out var cached) && cached is not null)
-                return cached;
+            if (_ocrCache.TryGetValue(cacheKey, out var cached) && cached is not null)
+                return (cached, null);
 
             OcrEngine? created = null;
             if (langCode != "auto")
             {
                 string tag = TranslationLanguage.ToWindowsBcp47Tag(langCode);
-                try
-                {
-                    var lang = new Language(tag);
-                    if (OcrEngine.IsLanguageSupported(lang))
-                        created = OcrEngine.TryCreateFromLanguage(lang);
-                }
-                catch { }
+                created = TryCreateOcrForTag(tag) ?? TryCreateOcrForTag(langCode);
 
-                if (created is null)
+                // 非ラテン文字言語が明示指定されているのにOS側にOCRパックが無い場合は案内を返す
+                if (created is null && langCode is "zh-Hans" or "zh-Hant" or "ko" or "ru" or "ja")
                 {
-                    // 短縮コード（"en", "ja", "zh-Hans" 等）でもう一度試行
-                    try
-                    {
-                        var shortLang = new Language(langCode);
-                        if (OcrEngine.IsLanguageSupported(shortLang))
-                            created = OcrEngine.TryCreateFromLanguage(shortLang);
-                    }
-                    catch { }
+                    var langObj = TranslationLanguage.SourceOptions.FirstOrDefault(x => x.Code == langCode);
+                    string disp = string.IsNullOrEmpty(langObj.ShortName) ? langCode : langObj.ShortName;
+                    return (null, $"Windows の「{disp}」OCR言語パックが未導入です（設定 → 時刻と言語 → 言語と地域 から追加できます）");
                 }
             }
 
             if (created is null)
             {
-                // "auto" または指定言語パック未導入時は、英語 → 日本語 → ユーザープロファイル言語の順でフォールバック
-                foreach (string candidateTag in new[] { "en-US", "en", "ja-JP", "ja" })
+                string[] preferredOrder = targetLangCode == "en"
+                    ? ["ja-JP", "ja", "en-US", "en"]
+                    : ["en-US", "en", "ja-JP", "ja"];
+
+                foreach (string candidateTag in preferredOrder)
                 {
-                    try
-                    {
-                        var l = new Language(candidateTag);
-                        if (OcrEngine.IsLanguageSupported(l))
-                        {
-                            created = OcrEngine.TryCreateFromLanguage(l);
-                            if (created is not null) break;
-                        }
-                    }
-                    catch { }
+                    created = TryCreateOcrForTag(candidateTag);
+                    if (created is not null) break;
                 }
                 created ??= OcrEngine.TryCreateFromUserProfileLanguages();
             }
 
             if (created is not null)
-                _ocrCache[langCode] = created;
-            return created;
+                _ocrCache[cacheKey] = created;
+            return (created, null);
         }
+    }
+
+    private static OcrEngine? TryCreateOcrForTag(string tag)
+    {
+        try
+        {
+            var l = new Language(tag);
+            if (OcrEngine.IsLanguageSupported(l))
+                return OcrEngine.TryCreateFromLanguage(l);
+        }
+        catch { }
+        return null;
     }
 
     private bool EnsureGdiBuffer(int width, int height)
@@ -496,7 +586,7 @@ internal sealed class WindowsCaptureEngine : IDisposable
                 {
                     biSize = (uint)Marshal.SizeOf<Win32Interop.BITMAPINFOHEADER>(),
                     biWidth = width,
-                    biHeight = -height, // Top-down DIB (左上原点!)
+                    biHeight = -height, // Top-down DIB (左上原点)
                     biPlanes = 1,
                     biBitCount = 32,
                     biCompression = Win32Interop.BI_RGB

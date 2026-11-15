@@ -157,7 +157,7 @@ Check(vkPicked.Count == 1 && vkDir == "vulkan" && vkPicked[0].Url == "u3", "Vulk
 var cudaPicked = NativeSidecarManager.SelectEngineAssets(mockAssets, GpuEngineFlavor.Cuda, out string cudaDir);
 Check(cudaPicked.Count == 2 && cudaDir == "cuda", "CUDAランタイムはcudartと本体の両方が選択されること");
 
-// v1.0.0 のようなアセット空リリースをスキップして b12413 の Windows x64 アセットを取得できること
+// v1.0.0 のようなアセット空リリースをスキップして b12413 の Windows x64 アセット（Vulkan / CUDA 12.x優先 / CPU互換）を取得できること
 string mockReleasesJson = """
 [
   {
@@ -169,10 +169,12 @@ string mockReleasesJson = """
     "tag_name": "b12413",
     "draft": false,
     "assets": [
-      { "name": "cudart-llama-bin-win-cuda-12.4-x64.zip", "browser_download_url": "url_cudart_12_4", "size": 391443627 },
       { "name": "cudart-llama-bin-win-cuda-13.5-x64.zip", "browser_download_url": "url_cudart_13_5", "size": 426314199 },
+      { "name": "llama-b12413-bin-win-cuda-13.5-x64.zip", "browser_download_url": "url_llama_13_5", "size": 203431830 },
+      { "name": "cudart-llama-bin-win-cuda-12.4-x64.zip", "browser_download_url": "url_cudart_12_4", "size": 391443627 },
       { "name": "llama-b12413-bin-win-cuda-12.4-x64.zip", "browser_download_url": "url_llama_12_4", "size": 320044481 },
-      { "name": "llama-b12413-bin-win-vulkan-x64.zip", "browser_download_url": "url_llama_vulkan", "size": 50000000 }
+      { "name": "llama-b12413-bin-win-vulkan-x64.zip", "browser_download_url": "url_llama_vulkan", "size": 50000000 },
+      { "name": "llama-b12413-bin-win-cpu-x64.zip", "browser_download_url": "url_llama_cpu", "size": 25142557 }
     ]
   }
 ]
@@ -181,7 +183,9 @@ using var mockReleasesDoc = System.Text.Json.JsonDocument.Parse(mockReleasesJson
 var pickedReleaseVk = NativeSidecarManager.PickLatestReleaseAssetsFromJson(mockReleasesDoc.RootElement, GpuEngineFlavor.Vulkan, out string relVkDir);
 Check(pickedReleaseVk.Count == 1 && relVkDir == "vulkan" && pickedReleaseVk[0].Name == "llama-b12413-bin-win-vulkan-x64.zip", "アセット空のv1.0.0をスキップしてb12413のVulkanが選ばれること");
 var pickedReleaseCuda = NativeSidecarManager.PickLatestReleaseAssetsFromJson(mockReleasesDoc.RootElement, GpuEngineFlavor.Cuda, out string relCudaDir);
-Check(pickedReleaseCuda.Count == 2 && relCudaDir == "cuda" && pickedReleaseCuda[0].Name.Contains("12.4") && pickedReleaseCuda[1].Name.Contains("12.4"), "CUDAは同一バージョンのcudartと本体がペアで選ばれること");
+Check(pickedReleaseCuda.Count == 2 && relCudaDir == "cuda" && pickedReleaseCuda[0].Name.Contains("12.4") && pickedReleaseCuda[1].Name.Contains("12.4"), "CUDAは互換性の広い12.4系のcudartと本体がペアで優先選択されること");
+var pickedReleaseCpu = NativeSidecarManager.PickLatestReleaseAssetsFromJson(mockReleasesDoc.RootElement, GpuEngineFlavor.Cpu, out string relCpuDir);
+Check(pickedReleaseCpu.Count == 1 && relCpuDir == "cpu" && pickedReleaseCpu[0].Name == "llama-b12413-bin-win-cpu-x64.zip", "CPU互換モードでwin-cpu-x64が選択されること");
 
 string progStr = NativeSidecarManager.FormatProgressSummary(new SidecarStatusSnapshot(
     SidecarState.Downloading, TranslationBackendKind.Plamo2B, "DL中", 0.5, 905_000_000L, 1_810_000_000L, 52_428_800.0));

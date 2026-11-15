@@ -46,8 +46,7 @@ internal sealed class RegionSelectorController
         private readonly ShapePath _scrimPath = new();
         private readonly Rectangle _hairlineRect = new() { Visibility = Visibility.Collapsed };
         private readonly ShapePath _bracketPath = new() { Visibility = Visibility.Collapsed };
-        private readonly Border _sizeBadge = new() { Visibility = Visibility.Collapsed };
-        private readonly TextBlock _sizeText = new();
+        private readonly TextBlock _sizeText = new() { Visibility = Visibility.Collapsed };
 
         private Point? _dragStart;
         private Point? _currentPoint;
@@ -69,7 +68,7 @@ internal sealed class RegionSelectorController
             Width = SystemParameters.VirtualScreenWidth;
             Height = SystemParameters.VirtualScreenHeight;
 
-            _scrimPath.Fill = new SolidColorBrush(Color.FromArgb(108, 10, 15, 20));
+            _scrimPath.Fill = new SolidColorBrush(Color.FromArgb(107, 10, 15, 20));
             _canvas.Children.Add(_scrimPath);
 
             _hairlineRect.Stroke = new SolidColorBrush(Color.FromArgb(90, 255, 255, 255));
@@ -77,19 +76,14 @@ internal sealed class RegionSelectorController
             _canvas.Children.Add(_hairlineRect);
 
             _bracketPath.Stroke = new SolidColorBrush(Color.FromRgb(0x4D, 0xA8, 0x92));
-            _bracketPath.StrokeThickness = 1.6;
+            _bracketPath.StrokeThickness = 1.5;
             _canvas.Children.Add(_bracketPath);
 
-            _sizeText.FontFamily = new FontFamily("Consolas, Yu Gothic UI");
-            _sizeText.FontSize = 11.5;
-            _sizeText.FontWeight = FontWeights.SemiBold;
+            _sizeText.FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI");
+            _sizeText.FontSize = 11.0;
+            _sizeText.FontWeight = FontWeights.Medium;
             _sizeText.Foreground = new SolidColorBrush(Color.FromRgb(0x4D, 0xA8, 0x92));
-
-            _sizeBadge.Background = new SolidColorBrush(Color.FromArgb(215, 14, 18, 24));
-            _sizeBadge.CornerRadius = new CornerRadius(4);
-            _sizeBadge.Padding = new Thickness(6, 2, 6, 2);
-            _sizeBadge.Child = _sizeText;
-            _canvas.Children.Add(_sizeBadge);
+            _canvas.Children.Add(_sizeText);
 
             Content = _canvas;
 
@@ -203,20 +197,19 @@ internal sealed class RegionSelectorController
                 _bracketPath.Visibility = Visibility.Visible;
                 _bracketPath.Data = BuildCornerBracketsGeometry(sel, 12.0);
 
-                var dpi = VisualTreeHelper.GetDpi(this);
-                int pw = (int)Math.Round(sel.Width * dpi.DpiScaleX);
-                int ph = (int)Math.Round(sel.Height * dpi.DpiScaleY);
-                _sizeText.Text = $"{pw} × {ph}";
-                _sizeBadge.Visibility = Visibility.Visible;
-                Canvas.SetLeft(_sizeBadge, sel.X);
-                Canvas.SetTop(_sizeBadge, Math.Max(6, sel.Y - 24));
+                int lw = (int)Math.Round(sel.Width);
+                int lh = (int)Math.Round(sel.Height);
+                _sizeText.Text = $"{lw} × {lh}";
+                _sizeText.Visibility = Visibility.Visible;
+                Canvas.SetLeft(_sizeText, sel.X);
+                Canvas.SetTop(_sizeText, Math.Max(8, sel.Bottom + 6));
             }
             else
             {
                 _scrimPath.Data = outer;
                 _hairlineRect.Visibility = Visibility.Collapsed;
                 _bracketPath.Visibility = Visibility.Collapsed;
-                _sizeBadge.Visibility = Visibility.Collapsed;
+                _sizeText.Visibility = Visibility.Collapsed;
             }
         }
     }
@@ -270,21 +263,21 @@ internal sealed class RegionIndicatorWindow : Window
         Focusable = false;
         IsHitTestVisible = false;
 
-        _fillBox.Fill = new SolidColorBrush(Color.FromArgb(22, 0x4D, 0xA8, 0x92));
+        _fillBox.Fill = new SolidColorBrush(Color.FromArgb(20, 0x4D, 0xA8, 0x92));
         _fillBox.RadiusX = 4;
         _fillBox.RadiusY = 4;
         _canvas.Children.Add(_fillBox);
 
-        _bracketPath.Stroke = new SolidColorBrush(Color.FromArgb(230, 0x4D, 0xA8, 0x92));
-        _bracketPath.StrokeThickness = 1.6;
+        _bracketPath.Stroke = new SolidColorBrush(Color.FromArgb(217, 0x4D, 0xA8, 0x92));
+        _bracketPath.StrokeThickness = 1.5;
         _canvas.Children.Add(_bracketPath);
 
-        _badgeText.FontFamily = new FontFamily("Consolas, Yu Gothic UI");
+        _badgeText.FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI");
         _badgeText.FontSize = 10.5;
         _badgeText.FontWeight = FontWeights.Bold;
         _badgeText.Foreground = Brushes.White;
 
-        _badge.Background = new SolidColorBrush(Color.FromArgb(230, 18, 24, 32));
+        _badge.Background = new SolidColorBrush(Color.FromArgb(230, 20, 28, 36));
         _badge.CornerRadius = new CornerRadius(4);
         _badge.Padding = new Thickness(5, 1, 5, 1);
         _badge.Child = _badgeText;
@@ -301,11 +294,11 @@ internal sealed class RegionIndicatorWindow : Window
 
     public void ShowAround(ScreenRect logicalRect, string? badgeLabel, bool emphasized)
     {
-        double topPad = !string.IsNullOrEmpty(badgeLabel) ? 20.0 : 4.0;
+        double topPad = !string.IsNullOrEmpty(badgeLabel) ? 18.0 : 4.0;
         Left = logicalRect.X - 4.0;
         Top = logicalRect.Y - topPad;
         Width = Math.Max(28.0, logicalRect.Width + 8.0);
-        Height = Math.Max(24.0, logicalRect.Height + topPad + 4.0);
+        Height = Math.Max(22.0, logicalRect.Height + topPad + 4.0);
 
         var box = new Rect(4.0, topPad, Math.Max(20.0, logicalRect.Width), Math.Max(14.0, logicalRect.Height));
 
@@ -315,7 +308,7 @@ internal sealed class RegionIndicatorWindow : Window
         Canvas.SetLeft(_fillBox, box.X);
         Canvas.SetTop(_fillBox, box.Y);
 
-        _bracketPath.Stroke = new SolidColorBrush(Color.FromArgb((byte)(emphasized ? 245 : 165), 0x4D, 0xA8, 0x92));
+        _bracketPath.Stroke = new SolidColorBrush(Color.FromArgb((byte)(emphasized ? 242 : 166), 0x4D, 0xA8, 0x92));
         _bracketPath.StrokeThickness = emphasized ? 1.8 : 1.2;
         _bracketPath.Data = RegionSelectorController.BuildCornerBracketsGeometry(box, 9.0);
 
@@ -324,7 +317,7 @@ internal sealed class RegionIndicatorWindow : Window
             _badge.Visibility = Visibility.Visible;
             _badgeText.Text = badgeLabel;
             Canvas.SetLeft(_badge, 4.0);
-            Canvas.SetTop(_badge, Math.Max(0, topPad - 18.0));
+            Canvas.SetTop(_badge, Math.Max(0, topPad - 17.0));
         }
         else
         {
@@ -337,8 +330,8 @@ internal sealed class RegionIndicatorWindow : Window
 }
 
 /// <summary>
-/// ゲーム画面の該当クラスタ位置に直接モノクロすりガラス訳文チップを浮かべる完全クリック透過オーバーレイ。
-/// WDA_EXCLUDEFROMCAPTURE によりキャプチャから除外され、マウス接近時は該当チップを α=0.12 に自動退避する。
+/// ゲーム画面の該当クラスタ位置に直接モノクロ訳文チップを浮かべる完全クリック透過オーバーレイ。
+/// macOS 版 InPlaceOverlayController と同一配色・同一角丸・マウス接近 α=0.12 自動退避を実装。
 /// </summary>
 internal sealed class InPlaceOverlayController : IDisposable
 {
@@ -374,26 +367,27 @@ internal sealed class InPlaceOverlayController : IDisposable
         _activeChips.Clear();
 
         var cursorLogical = GetLogicalCursorPoint();
-        var emeraldStroke = new SolidColorBrush(Color.FromArgb(190, 0x4D, 0xA8, 0x92));
-        var calmStroke = new SolidColorBrush(Color.FromArgb(52, 255, 255, 255));
+        var emeraldStroke = new SolidColorBrush(Color.FromArgb(191, 0x4D, 0xA8, 0x92));
+        var calmStroke = new SolidColorBrush(Color.FromArgb(51, 255, 255, 255));
         var chipBg = new SolidColorBrush(Color.FromArgb(230, 15, 20, 28));
 
         foreach (var item in ready)
         {
-            double desiredW = Math.Clamp(item.ScreenBounds.Width + 14.0, 160.0, Math.Min(580.0, bounds.Width - 16.0));
+            double desiredW = Math.Clamp(item.ScreenBounds.Width + 12.0, 160.0, Math.Min(580.0, bounds.Width - 16.0));
             double centeredX = item.ScreenBounds.MidX - desiredW * 0.5;
             double clampedGlobalX = Math.Clamp(centeredX, bounds.X + 8.0, bounds.Right - desiredW - 8.0);
-            double clampedGlobalY = Math.Clamp(item.ScreenBounds.Y, bounds.Y + 4.0, bounds.Bottom - 36.0);
+            double clampedGlobalY = Math.Clamp(item.ScreenBounds.Y, bounds.Y + 4.0, bounds.Bottom - 32.0);
 
             var tb = new TextBlock
             {
                 Text = item.DisplayBodyText,
-                FontFamily = new FontFamily("Yu Gothic UI, Meiryo UI, Segoe UI"),
+                FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI, Yu Gothic UI, Meiryo UI"),
                 FontSize = 13.5,
                 FontWeight = FontWeights.Medium,
-                Foreground = new SolidColorBrush(Color.FromArgb((byte)(item.IsTranslating ? 216 : 245), 255, 255, 255)),
+                Foreground = new SolidColorBrush(Color.FromArgb((byte)(item.IsTranslating ? 217 : 245), 255, 255, 255)),
                 TextWrapping = TextWrapping.Wrap,
-                LineHeight = 20.0
+                LineHeight = 20.5,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight
             };
 
             var chip = new Border
@@ -402,14 +396,14 @@ internal sealed class InPlaceOverlayController : IDisposable
                 MinHeight = Math.Clamp(item.ScreenBounds.Height, 26.0, 140.0),
                 Background = chipBg,
                 BorderBrush = item.IsTranslating ? emeraldStroke : calmStroke,
-                BorderThickness = new Thickness(0.9),
+                BorderThickness = new Thickness(0.8),
                 CornerRadius = new CornerRadius(7),
                 Padding = new Thickness(9, 6, 9, 6),
                 Child = tb,
                 IsHitTestVisible = false
             };
 
-            double estimatedH = Math.Max(chip.MinHeight, ((item.DisplayBodyText.Length / 18) + 1) * 21.0 + 12.0);
+            double estimatedH = Math.Max(chip.MinHeight, ((item.DisplayBodyText.Length / 18) + 1) * 22.0 + 12.0);
             var chipLogicalRect = new ScreenRect(clampedGlobalX, clampedGlobalY, desiredW, estimatedH);
             bool fade = ClusterGeometry.ShouldFadeChipForCursor(chipLogicalRect, cursorLogical.X, cursorLogical.Y);
             chip.Opacity = fade ? 0.12 : 1.0;
@@ -466,9 +460,20 @@ internal sealed class InPlaceOverlayController : IDisposable
 
     private (double X, double Y) GetLogicalCursorPoint()
     {
-        if (Win32Interop.GetCursorPos(out var p))
-            return (p.X / _dpiScaleX, p.Y / _dpiScaleY);
-        return (-99999, -99999);
+        if (!Win32Interop.GetCursorPos(out var p))
+            return (-99999, -99999);
+
+        if (_window is { IsVisible: true })
+        {
+            try
+            {
+                var local = _window.PointFromScreen(new Point(p.X, p.Y));
+                return (_window.Left + local.X, _window.Top + local.Y);
+            }
+            catch { }
+        }
+
+        return (p.X / _dpiScaleX, p.Y / _dpiScaleY);
     }
 
     public void Dispose()

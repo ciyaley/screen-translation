@@ -147,72 +147,89 @@ acquire_lock_or_exit
 
     # Apple Silicon では plamo3 ネイティブ対応かつアイドルCPU 0% の MLX-4bit (Metal直結) を第一優先にする
     if [[ "$(uname -m)" == "arm64" ]]; then
-        if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-            write_status "starting" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL}) Apple MLX 環境を初期化中…"
-            if command -v uv >/dev/null 2>&1; then
-                uv venv "${VENV_DIR}" >>"${LOG_FILE}" 2>&1 || python3 -m venv "${VENV_DIR}" >>"${LOG_FILE}" 2>&1
-                uv pip install --python "${VENV_DIR}/bin/python" -U "huggingface_hub[hf_xet]" mlx-lm >>"${LOG_FILE}" 2>&1
-            else
-                python3 -m venv "${VENV_DIR}" >>"${LOG_FILE}" 2>&1
-                "${VENV_DIR}/bin/pip" install -q -U pip "huggingface_hub[hf_xet]" mlx-lm >>"${LOG_FILE}" 2>&1
+        MODERN_PY=""
+        for cand_py in "${BREW_ARM}/python3.13" "${BREW_ARM}/python3.12" "${BREW_ARM}/python3.11" "${BREW_ARM}/python3.10" "${BREW_ARM}/python3" "${BREW_INTEL}/python3.12" "${BREW_INTEL}/python3"; do
+            if [[ -x "${cand_py}" ]] && "${cand_py}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+                MODERN_PY="${cand_py}"
+                break
+            fi
+        done
+        if [[ -z "${MODERN_PY}" ]] && /usr/bin/xcode-select -p >/dev/null 2>&1 && [[ -x "/usr/bin/python3" ]]; then
+            if /usr/bin/python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+                MODERN_PY="/usr/bin/python3"
             fi
         fi
 
-        if [[ ! -f "${MODEL_DIR}/config.json" ]]; then
-            write_status "downloading" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL} MLX-4bit) 重みをダウンロード中…"
-            "${VENV_DIR}/bin/python" - "${MLX_REPO}" "${MODEL_DIR}" >>"${LOG_FILE}" 2>&1 <<'PY'
+        if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+            write_status "starting" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL}) Apple MLX 環境を初期化中…"
+            if command -v uv >/dev/null 2>&1; then
+                uv venv --python 3.12 "${VENV_DIR}" >>"${LOG_FILE}" 2>&1 || ${MODERN_PY:+ "${MODERN_PY}" -m venv "${VENV_DIR}"} >>"${LOG_FILE}" 2>&1 || true
+                if [[ -x "${VENV_DIR}/bin/python" ]]; then
+                    uv pip install --python "${VENV_DIR}/bin/python" -U "huggingface_hub[hf_xet]" mlx-lm >>"${LOG_FILE}" 2>&1 || rm -rf "${VENV_DIR}"
+                fi
+            elif [[ -n "${MODERN_PY}" ]]; then
+                "${MODERN_PY}" -m venv "${VENV_DIR}" >>"${LOG_FILE}" 2>&1
+                "${VENV_DIR}/bin/pip" install -q -U pip "huggingface_hub[hf_xet]" mlx-lm >>"${LOG_FILE}" 2>&1 || rm -rf "${VENV_DIR}"
+            fi
+        fi
+
+        if [[ -x "${VENV_DIR}/bin/python" ]]; then
+            if [[ ! -f "${MODEL_DIR}/config.json" ]]; then
+                write_status "downloading" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL} MLX-4bit) 重みをダウンロード中…"
+                "${VENV_DIR}/bin/python" - "${MLX_REPO}" "${MODEL_DIR}" >>"${LOG_FILE}" 2>&1 <<'PY'
 import sys
 from huggingface_hub import snapshot_download
 snapshot_download(repo_id=sys.argv[1], local_dir=sys.argv[2])
 PY
-        fi
+            fi
 
-        if [[ -f "${MODEL_DIR}/requirements-mlx.txt" ]] && [[ ! -f "${MODEL_DIR}/.deps_installed" ]]; then
-            write_status "starting" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL}) 依存ライブラリを確認中…"
-            if command -v uv >/dev/null 2>&1; then
-                uv pip install --python "${VENV_DIR}/bin/python" -r "${MODEL_DIR}/requirements-mlx.txt" >>"${LOG_FILE}" 2>&1
+            if [[ -f "${MODEL_DIR}/requirements-mlx.txt" ]] && [[ ! -f "${MODEL_DIR}/.deps_installed" ]]; then
+                write_status "starting" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL}) 依存ライブラリを確認中…"
+                if command -v uv >/dev/null 2>&1; then
+                    uv pip install --python "${VENV_DIR}/bin/python" -r "${MODEL_DIR}/requirements-mlx.txt" >>"${LOG_FILE}" 2>&1
+                else
+                    "${VENV_DIR}/bin/pip" install -q -r "${MODEL_DIR}/requirements-mlx.txt" >>"${LOG_FILE}" 2>&1
+                fi
+                touch "${MODEL_DIR}/.deps_installed"
+            fi
+
+            write_status "starting" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL} MLX-4bit) を Metal へロード中…"
+            : > "${LOG_FILE}"
+            cd "${MODEL_DIR}"
+            if [[ -f "serve.py" ]]; then
+                nohup "${VENV_DIR}/bin/python" serve.py \
+                    --model . \
+                    --trust-remote-code \
+                    --decode-concurrency 1 \
+                    --prompt-concurrency 1 \
+                    --prompt-cache-bytes 256MB \
+                    --host 127.0.0.1 \
+                    --port "${PORT}" \
+                    >>"${LOG_FILE}" 2>&1 &
             else
-                "${VENV_DIR}/bin/pip" install -q -r "${MODEL_DIR}/requirements-mlx.txt" >>"${LOG_FILE}" 2>&1
+                nohup "${VENV_DIR}/bin/python" -m mlx_lm.server \
+                    --model . \
+                    --trust-remote-code \
+                    --host 127.0.0.1 \
+                    --port "${PORT}" \
+                    >>"${LOG_FILE}" 2>&1 &
             fi
-            touch "${MODEL_DIR}/.deps_installed"
-        fi
+            SRV_PID=$!
+            echo "${SRV_PID}" > "${PID_FILE}"
+            echo "${REQ_SIZE}" > "${SIZE_FILE}"
 
-        write_status "starting" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL} MLX-4bit) を Metal へロード中…"
-        : > "${LOG_FILE}"
-        cd "${MODEL_DIR}"
-        if [[ -f "serve.py" ]]; then
-            nohup "${VENV_DIR}/bin/python" serve.py \
-                --model . \
-                --trust-remote-code \
-                --decode-concurrency 1 \
-                --prompt-concurrency 1 \
-                --prompt-cache-bytes 256MB \
-                --host 127.0.0.1 \
-                --port "${PORT}" \
-                >>"${LOG_FILE}" 2>&1 &
-        else
-            nohup "${VENV_DIR}/bin/python" -m mlx_lm.server \
-                --model . \
-                --trust-remote-code \
-                --host 127.0.0.1 \
-                --port "${PORT}" \
-                >>"${LOG_FILE}" 2>&1 &
+            for _ in {1..120}; do
+                if is_port_ready; then
+                    write_status "ready" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL}) 稼働中"
+                    exit 0
+                fi
+                if ! kill -0 "${SRV_PID}" 2>/dev/null; then
+                    rm -f "${PID_FILE}" "${SIZE_FILE}"
+                    break
+                fi
+                sleep 0.5
+            done
         fi
-        SRV_PID=$!
-        echo "${SRV_PID}" > "${PID_FILE}"
-        echo "${REQ_SIZE}" > "${SIZE_FILE}"
-
-        for _ in {1..120}; do
-            if is_port_ready; then
-                write_status "ready" "${REQ_SIZE}" "mlx-lm" "PLaMo 3 (${SIZE_LABEL}) 稼働中"
-                exit 0
-            fi
-            if ! kill -0 "${SRV_PID}" 2>/dev/null; then
-                rm -f "${PID_FILE}" "${SIZE_FILE}"
-                break
-            fi
-            sleep 0.5
-        done
     fi
 
     # フォールバック: llama-server（CPUスレッド暴走防止のため -t 2 -tb 2 -ngl 99 を強制）

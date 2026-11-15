@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 namespace ScreenTranslate.App;
 
 /// <summary>
-/// Windows DWM すりガラス・キャプチャ自己除外(WDA_EXCLUDEFROMCAPTURE)・クリック透過・GDIキャプチャ・
-/// グローバルホットキー・Win32 JobObject（親プロセス終了時の子推論サーバー自動終了保証）用 P/Invoke 定義。
+/// Windows DWM すりガラス・フレーム余白完全除去(WM_NCCALCSIZE)・キャプチャ自己除外(WDA_EXCLUDEFROMCAPTURE)・
+/// クリック透過・GDIキャプチャ・グローバルホットキー・Win32 JobObject 用 P/Invoke 定義。
 /// </summary>
 internal static class Win32Interop
 {
@@ -18,6 +18,7 @@ internal static class Win32Interop
     public const int WS_EX_LAYERED = 0x00080000;
     public const int WS_EX_NOACTIVATE = 0x08000000;
 
+    public const int WM_NCCALCSIZE = 0x0083;
     public const int WM_HOTKEY = 0x0312;
     public const uint MOD_ALT = 0x0001;
     public const uint MOD_SHIFT = 0x0004;
@@ -34,9 +35,13 @@ internal static class Win32Interop
 
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    public const int DWMWA_BORDER_COLOR = 34;
     public const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
     public const int DWMWCP_ROUND = 2;
     public const int DWMSBT_TRANSIENTWINDOW = 3; // Acrylic backdrop in Windows 11
+
+    // Subtle dark charcoal border COLORREF (0x00BBGGRR -> #282E36) so Windows 11 DWM draws a clean hairline
+    public const int DWM_SUBTLE_DARK_BORDER = 0x00362E28;
 
     public const int SRCCOPY = 0x00CC0020;
     public const int DIB_RGB_COLORS = 0;
@@ -196,6 +201,9 @@ internal static class Win32Interop
     [DllImport("gdi32.dll")]
     public static extern int SetStretchBltMode(IntPtr hdc, int mode);
 
+    [DllImport("gdi32.dll")]
+    public static extern bool SetBrushOrgEx(IntPtr hdc, int x, int y, IntPtr lppt);
+
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
@@ -220,10 +228,6 @@ internal static class Win32Interop
         }
     }
 
-    /// <summary>
-    /// 起動した推論エンジン (llama-server.exe) を親プロセスの JobObject に紐付け、
-    /// ScreenTranslate.exe を閉じた瞬間（強制終了時含む）に OS カーネル側で確実に同時終了させる。
-    /// </summary>
     public static void BindChildProcessToCurrentJob(Process childProcess)
     {
         try
@@ -249,25 +253,32 @@ internal static class Win32Interop
         ExcludeFromScreenCapture(hwnd);
     }
 
-    public static void EnableDarkAcrylicBackdrop(IntPtr hwnd)
+    /// <summary>
+    /// Windows 11 ネイティブ角丸 + ダークアクリルブラー + 微細ダークボーダーを適用する。
+    /// Windows 11 角丸ボーダーが有効化された場合は true を返し、WPF側の重複外枠描画を抑制できるようにする。
+    /// </summary>
+    public static bool EnableDarkAcrylicBackdrop(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero) return;
+        if (hwnd == IntPtr.Zero) return false;
 
         int dark = 1;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
 
         int round = DWMWCP_ROUND;
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+        int hrRound = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref round, sizeof(int));
+
+        int borderColor = DWM_SUBTLE_DARK_BORDER;
+        int hrBorder = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref borderColor, sizeof(int));
 
         int backdrop = DWMSBT_TRANSIENTWINDOW;
-        int hr = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
-        if (hr != 0)
+        int hrBackdrop = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+        if (hrBackdrop != 0)
         {
             var accent = new ACCENT_POLICY
             {
                 AccentState = 4,
                 AccentFlags = 2,
-                GradientColor = 0xCC1C1612
+                GradientColor = 0xAA1C1612
             };
             int size = Marshal.SizeOf<ACCENT_POLICY>();
             IntPtr ptr = Marshal.AllocHGlobal(size);
@@ -287,5 +298,7 @@ internal static class Win32Interop
                 Marshal.FreeHGlobal(ptr);
             }
         }
+
+        return hrRound == 0 && hrBorder == 0;
     }
 }

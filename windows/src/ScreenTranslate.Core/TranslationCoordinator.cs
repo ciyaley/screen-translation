@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace ScreenTranslate.Core;
 
 /// <summary>
-/// ユーザー設定の軽量JSON永続化（Windows の .runtime/settings.json に保存）。
+/// ユーザー設定の軽量JSON永続化（Windows の %LOCALAPPDATA%\ScreenTranslate\settings.json に保存）。
 /// </summary>
 public sealed class AppUserSettings
 {
@@ -56,7 +56,7 @@ public sealed class AppUserSettings
 }
 
 /// <summary>
-/// PLaMo 3 Translate ローカル推論サーバー（llama-server CUDA / Vulkan）および OpenAI 互換 API クライアント。
+/// PLaMo 3 Translate ローカル推論サーバー（llama-server Vulkan / CUDA / CPU）および OpenAI 互換 API クライアント。
 /// PFML3プロンプト生成・文脈管理・120msスロットルSSEストリーミングを統合する。
 /// </summary>
 public sealed class TranslationCoordinator
@@ -143,7 +143,7 @@ public sealed class TranslationCoordinator
         return ub.Uri;
     }
 
-    private static (string State, string Message)? ReadSidecarStatus(string? runtimeDir)
+    private static (string State, string Message, int Port)? ReadSidecarStatus(string? runtimeDir)
     {
         if (string.IsNullOrEmpty(runtimeDir)) return null;
         try
@@ -153,13 +153,17 @@ public sealed class TranslationCoordinator
             using var doc = JsonDocument.Parse(File.ReadAllText(statusPath, Encoding.UTF8));
             string st = doc.RootElement.TryGetProperty("state", out var s) ? (s.GetString() ?? string.Empty) : string.Empty;
             string msg = doc.RootElement.TryGetProperty("message", out var m) ? (m.GetString() ?? string.Empty) : string.Empty;
-            return (st, msg);
+            int port = doc.RootElement.TryGetProperty("port", out var p) && p.TryGetInt32(out int pv) && pv > 0 ? pv : DefaultPlamoPort;
+            return (st, msg, port);
         }
         catch
         {
             return null;
         }
     }
+
+    private static int ResolveActivePlamoPort(string? runtimeDir)
+        => ReadSidecarStatus(runtimeDir)?.Port ?? DefaultPlamoPort;
 
     private async Task<string?> DiscoverModelIdAsync(int port, CancellationToken ct)
     {
@@ -195,27 +199,30 @@ public sealed class TranslationCoordinator
         return null;
     }
 
-    private async Task<(string? ModelId, string? Error)> WaitUntilPlamoReadyAsync(
+    private async Task<(string? ModelId, int Port, string? Error)> WaitUntilPlamoReadyAsync(
         TranslationBackendKind backend,
         string? runtimeDir,
         Action<string> onStageUpdate,
         CancellationToken ct)
     {
-        if (await DiscoverModelIdAsync(DefaultPlamoPort, ct).ConfigureAwait(false) is { } immediate)
-            return (immediate, null);
+        int initialPort = ResolveActivePlamoPort(runtimeDir);
+        if (await DiscoverModelIdAsync(initialPort, ct).ConfigureAwait(false) is { } immediate)
+            return (immediate, initialPort, null);
 
         for (int tick = 0; tick < 300; tick++)
         {
             ct.ThrowIfCancellationRequested();
+            int currentPort = DefaultPlamoPort;
 
             if (ReadSidecarStatus(runtimeDir) is { } sidecar)
             {
+                currentPort = sidecar.Port;
                 if (sidecar.State == "error")
                 {
                     string errMsg = string.IsNullOrEmpty(sidecar.Message)
                         ? $"{backend.ShortName()} の起動に失敗しました"
                         : sidecar.Message;
-                    return (null, errMsg);
+                    return (null, currentPort, errMsg);
                 }
                 onStageUpdate(string.IsNullOrEmpty(sidecar.Message)
                     ? $"{backend.ShortName()} を準備中…"
@@ -227,11 +234,11 @@ public sealed class TranslationCoordinator
             }
 
             await Task.Delay(600, ct).ConfigureAwait(false);
-            if (await DiscoverModelIdAsync(DefaultPlamoPort, ct).ConfigureAwait(false) is { } readyId)
-                return (readyId, null);
+            if (await DiscoverModelIdAsync(currentPort, ct).ConfigureAwait(false) is { } readyId)
+                return (readyId, currentPort, null);
         }
 
-        return (null, $"{backend.ShortName()} サーバーが応答しません（画面内のダウンロードカードまたは ⚙ メニューを確認してください）");
+        return (null, initialPort, $"{backend.ShortName()} サーバーが応答しません");
     }
 
     private async Task<TranslationOutcome> TranslateWithPlamoAsync(
@@ -246,12 +253,14 @@ public sealed class TranslationCoordinator
         CancellationToken ct)
     {
         string? modelId;
+        int activePort;
         try
         {
             var ready = await WaitUntilPlamoReadyAsync(backend, runtimeDir, onStageUpdate, ct).ConfigureAwait(false);
             if (ready.Error is not null)
                 return new TranslationOutcome.Failed(ready.Error);
             modelId = ready.ModelId!;
+            activePort = ready.Port;
         }
         catch (OperationCanceledException)
         {
@@ -281,12 +290,12 @@ public sealed class TranslationCoordinator
         };
 
         string jsonBody = JsonSerializer.Serialize(payloadObj);
-        using var req = new HttpRequestMessage(HttpMethod.Post, BuildLoopbackUri(DefaultPlamoPort, "/v1/completions"))
+        using var req = new HttpRequestMessage(HttpMethod.Post, BuildLoopbackUri(activePort, "/v1/completions"))
         {
             Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
         };
 
-        onStageUpdate($"{backend.ShortName()} 翻訳中…（{cleanedText.Length}字）");
+        onStageUpdate($"{backend.ShortName()} 翻訳中…（原文 {cleanedText.Length}字）");
 
         try
         {
