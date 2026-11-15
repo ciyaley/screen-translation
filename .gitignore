@@ -2,8 +2,6 @@
 .build/
 .runtime/
 build/
-*.dmg
-*.zip
 
 # Windows build & runtime artifacts
 windows/.runtime/
